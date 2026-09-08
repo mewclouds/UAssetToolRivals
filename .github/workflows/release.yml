@@ -46,8 +46,7 @@ jobs:
           -c Release
           -r ${{ matrix.rid }}
           --self-contained
-          -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishSingleFile=false
           -p:Version=${{ steps.version.outputs.value }}
           -o publish
 
@@ -55,7 +54,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: publish/UAssetTool${{ matrix.ext }}
+          path: publish/
 
   release:
     needs: build
@@ -76,8 +75,8 @@ jobs:
 
       - name: Prepare release assets
         run: |
-          cd win-x64 && zip -j ../UAssetTool-win-x64.zip UAssetTool.exe && cd ..
-          cd linux-x64 && chmod +x UAssetTool && tar czf ../UAssetTool-linux-x64.tar.gz UAssetTool && cd ..
+          cd win-x64 && zip -r ../UAssetTool-win-x64.zip . && cd ..
+          cd linux-x64 && chmod +x UAssetTool && tar czf ../UAssetTool-linux-x64.tar.gz . && cd ..
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

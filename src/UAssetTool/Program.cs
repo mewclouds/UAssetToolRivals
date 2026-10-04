@@ -66,6 +66,7 @@ public partial class Program
                 "is_iostore_encrypted" => CliIsIoStoreEncrypted(args),
                 "extract_script_objects" => CliExtractScriptObjects(args),
                 "recompress_iostore" => CliRecompressIoStore(args),
+                "decrypt_iostore" => CliDecryptIoStore(args),
                 "cityhash" => CliCityHash(args),
                 "from_json" => CliFromJson(args),
                 "to_json" => CliToJson(args),
@@ -1411,6 +1412,21 @@ public partial class Program
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Decrypt existing IoStore blocks without asset conversion or recompression.
+    /// </summary>
+    private static int CliDecryptIoStore(string[] args)
+    {
+        if (args.Length != 2 && (args.Length != 4 || args[2] != "--aes-key"))
+        {
+            Console.Error.WriteLine("Usage: UAssetTool decrypt_iostore <utoc_path> [--aes-key <hex>]");
+            return 1;
+        }
+        bool changed = IoStore.IoStoreDecryptor.Decrypt(args[1], args.Length == 4 ? args[3] : null);
+        Console.WriteLine(changed ? "IoStore decrypted." : "IoStore is already clear.");
+        return 0;
     }
 
     /// <summary>
@@ -2878,6 +2894,7 @@ public partial class Program
                 "is_iostore_compressed" => IsIoStoreCompressed(request.FilePath),
                 "is_iostore_encrypted" => IsIoStoreEncrypted(request.FilePath),
                 "recompress_iostore" => RecompressIoStore(request.FilePath),
+                "decrypt_iostore" => DecryptIoStoreJson(request.FilePath, request.AesKey),
                 "extract_iostore" => ExtractIoStoreJson(request.FilePath, request.OutputPath, request.AesKey),
                 "extract_iostore_legacy" => ExtractIoStoreLegacyJson(request.GamePaks, request.ModPath, request.OutputPath, request.FilterPatterns, request.AesKey, request.WithDeps),
                 "extract_script_objects" => ExtractScriptObjectsJson(request.FilePath, request.OutputPath),
@@ -6732,6 +6749,22 @@ public partial class Program
         {
             return new UAssetResponse { Success = false, Message = $"Failed to check encryption: {ex.Message}" };
         }
+    }
+
+    /// <summary>
+    /// Decrypt existing blocks and report the resulting encryption state.
+    /// </summary>
+    private static UAssetResponse DecryptIoStoreJson(string? utocPath, string? aesKeyHex)
+    {
+        if (string.IsNullOrWhiteSpace(utocPath))
+            return new UAssetResponse { Success = false, Message = "UTOC path is required" };
+        bool changed = IoStore.IoStoreDecryptor.Decrypt(utocPath, aesKeyHex);
+        return new UAssetResponse
+        {
+            Success = true,
+            Message = changed ? "IoStore decrypted" : "IoStore is already clear",
+            Data = new { encrypted = false, changed }
+        };
     }
 
     /// <summary>

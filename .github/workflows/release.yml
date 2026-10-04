@@ -33,6 +33,9 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Test direct decryption
+        run: dotnet run --project tests/UAssetTool.Tests -c Release
+
       # The workflow only runs on v* tags, so the tag is the version. Without this the
       # csproj default is baked in and every release reports itself as 1.0.0.
       - name: Resolve version from tag

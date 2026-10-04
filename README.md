@@ -482,6 +482,7 @@ UAssetTool inspect_zen <zen_asset_path>
 UAssetTool extract_iostore <utoc_path> <output_dir> [--aes <key>] [--package <name>]
 UAssetTool extract_script_objects <paks_path> <output_file>
 UAssetTool recompress_iostore <utoc_path>
+UAssetTool decrypt_iostore <utoc_path> [--aes-key <hex>]
 UAssetTool is_iostore_compressed <utoc_path>
 UAssetTool is_iostore_encrypted <utoc_path>
 UAssetTool clone_mod_iostore <utoc_path> <output_base>
@@ -496,6 +497,14 @@ UAssetTool create_companion_pak <output.pak> <files...>
 ---
 
 ## Interactive JSON Mode
+
+`decrypt_iostore` removes AES encryption from existing blocks. It preserves compressed bytes, cooked assets, paths, and container IDs.
+It supports unsigned TOC versions 1 through 5 with one UCAS partition.
+It handles clear obfuscated indexes and encrypted directory indexes. A clear container succeeds without a rewrite.
+The companion PAK does not change. Validation failures leave the source files intact.
+The operation restores the UCAS backup if TOC replacement fails. A failed rollback reports the retained backup path.
+The optional key defaults to the Marvel Rivals game key.
+An encrypted directory index can validate a supplied key. A clear index cannot validate that key.
 
 Run without arguments for a JSON stdin/stdout API (for GUI frontends):
 
@@ -603,6 +612,7 @@ The `batch_extract_texture_png` action processes all files in `file_paths`, outp
 {"action": "extract_iostore", "file_path": "...", "output_path": "...", "aes_key": "..."}
 {"action": "is_iostore_encrypted", "file_path": "..."}
 {"action": "recompress_iostore", "file_path": "..."}
+{"action": "decrypt_iostore", "file_path": "...", "aes_key": "..."}
 ```
 
 </details>
@@ -610,6 +620,9 @@ The `batch_extract_texture_png` action processes all files in `file_paths`, outp
 ---
 
 ## Project Structure
+
+Run the direct-decryption regression checks with `dotnet run --project tests/UAssetTool.Tests -c Release`.
+The checks use disposable fixtures and require no additional test packages.
 
 ```
 UassetToolRivals/

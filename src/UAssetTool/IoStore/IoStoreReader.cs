@@ -12,7 +12,7 @@ namespace UAssetTool.IoStore;
 /// </summary>
 public class IoStoreReader : IDisposable
 {
-    private const string DEFAULT_AES_KEY_HEX = "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74";
+    internal const string DEFAULT_AES_KEY_HEX = "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74";
     
     private readonly string _containerName;
     private readonly string _utocPath;

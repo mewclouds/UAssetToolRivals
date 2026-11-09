@@ -30,6 +30,8 @@ var tests = new (string Name, Action Run, bool WindowsOnly)[]
     ("IoStore package scan failures", IoStorePackageScanTests.ReportUnreadableInputs, false),
     ("IoStore package scan invalid requests", IoStorePackageScanTests.RejectInvalidRequests, false),
     ("legacy extraction batch isolates mod overrides", LegacyExtractionBatchTests.ExtractInBothOrders, false),
+    ("asset layout reads reuse mappings and isolate failures", AssetLayoutReadTests.ReadBatch, false),
+    ("asset mappings keep discovered definitions local", AssetLayoutReadTests.IsolateDiscoveredMappings, false),
 };
 int passed = 0, failed = 0, skipped = 0;
 foreach (var test in tests)

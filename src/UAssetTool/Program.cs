@@ -2859,6 +2859,7 @@ public partial class Program
                 
                 // GUI Backend - Asset Structure
                 "get_asset_summary" => GetAssetSummary(request.FilePath, request.UsmapPath),
+                "read_asset_layouts" => ReadAssetLayoutsJson(request.LayoutReads),
                 "get_name_map" => GetNameMap(request.FilePath, request.UsmapPath),
                 "get_imports" => GetImports(request.FilePath, request.UsmapPath),
                 "get_exports" => GetExports(request.FilePath, request.UsmapPath),
@@ -7764,6 +7765,9 @@ public class UAssetRequest
     
     [JsonPropertyName("usmap_path")]
     public string? UsmapPath { get; set; }
+
+    [JsonPropertyName("layout_reads")]
+    public List<AssetLayoutReadRequest?>? LayoutReads { get; set; }
     
     // GUI Backend fields
     [JsonPropertyName("export_index")]

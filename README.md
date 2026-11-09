@@ -522,6 +522,13 @@ Each mod gets its own numbered output directory, starting at `0`, and its own pa
 Check both `result.success` and `result.data.failed_count` for each bundle.
 The optional `aes_key`, `filter_patterns`, and `with_deps` apply to the whole batch.
 
+`read_asset_layouts` reads extracted assets with caller-selected mappings. Send asset and
+mappings path pairs in `layout_reads`. The worker parses each mappings file once for the batch
+and isolates schemas discovered during each read.
+The response reports the package flag, export classes, and whether each read decoded every export.
+Clean reads include a value fingerprint for comparing layouts of the same asset.
+A failed read reports its own error in `data.reads`, in request order.
+
 Run without arguments for a JSON stdin/stdout API (for GUI frontends):
 
 ```bash
@@ -534,6 +541,7 @@ UAssetTool
 **Asset Structure**
 ```json
 {"action": "get_asset_summary", "file_path": "...", "usmap_path": "..."}
+{"action": "read_asset_layouts", "layout_reads": [{"file_path": "asset.uasset", "usmap_path": "build.usmap"}]}
 {"action": "get_name_map", "file_path": "..."}
 {"action": "get_imports", "file_path": "..."}
 {"action": "get_exports", "file_path": "..."}

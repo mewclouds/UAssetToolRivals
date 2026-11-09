@@ -1254,5 +1254,21 @@ namespace UAssetAPI.Unversioned
         {
 
         }
+
+        /// <summary>
+        /// Isolates the schemas, enums, and dependency paths discovered while reading one asset.
+        /// The parsed schema and enum definitions are shared as read-only data.
+        /// </summary>
+        public Usmap ForkForAssetRead()
+        {
+            var comparer = AreFNamesCaseInsensitive ? StringComparer.InvariantCultureIgnoreCase : StringComparer.InvariantCulture;
+            var copy = (Usmap)MemberwiseClone();
+            copy.Schemas = new Dictionary<string, UsmapSchema>(Schemas, comparer);
+            copy.EnumMap = new Dictionary<string, UsmapEnum>(EnumMap, comparer);
+            copy.PathsAlreadyProcessedForSchemas = new ConcurrentDictionary<string, byte>();
+            // Asset headers mark inherited custom versions as not serialized.
+            copy.CustomVersionContainer = CustomVersionContainer?.Select(version => (CustomVersion)version.Clone()).ToList();
+            return copy;
+        }
     }
 }

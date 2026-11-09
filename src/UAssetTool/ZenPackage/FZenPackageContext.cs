@@ -14,6 +14,7 @@ namespace UAssetTool.ZenPackage;
 /// </summary>
 public class FZenPackageContext : IDisposable
 {
+    private readonly FZenPackageContext? _gameContext;
     private readonly List<IoStoreReader> _containers = new();
     private readonly ConcurrentDictionary<ulong, CachedPackage> _packageCache = new();
     private readonly object _loadLock = new();
@@ -36,11 +37,37 @@ public class FZenPackageContext : IDisposable
     public ScriptObjectsDatabase? ScriptObjects { get; private set; }
     public EIoContainerHeaderVersion ContainerHeaderVersion { get; private set; } = EIoContainerHeaderVersion.NoExportInfo;
     
-    public int PackageCount => _packageIdToChunk.Count;
-    public int ContainerCount => _containers.Count;
+    public int PackageCount => _gameContext == null
+        ? _packageIdToChunk.Count
+        : _gameContext.PackageCount + _packageIdToChunk.Keys.Count(id => !_gameContext.HasPackage(id));
+    public int ContainerCount => GameContainerCount + _containers.Count;
+    private int GameContainerCount => _gameContext?.ContainerCount ?? 0;
 
     private byte[]? _aesKey;
     private readonly List<byte[]> _aesKeys = new();
+
+    public FZenPackageContext() { }
+
+    private FZenPackageContext(FZenPackageContext gameContext)
+    {
+        _gameContext = gameContext;
+        ContainerHeaderVersion = gameContext.ContainerHeaderVersion;
+        ScriptObjects = gameContext.ScriptObjects;
+        _aesKey = gameContext._aesKey;
+        _aesKeys.AddRange(gameContext._aesKeys);
+    }
+
+    // The game context stays loaded and unchanged until all mod contexts are disposed.
+    // Each mod owns its package payload cache and closes only its own container readers.
+    internal FZenPackageContext CreateModContext() => new(this);
+
+    private IoStoreReader GetContainer(int index) => index < GameContainerCount
+        ? _gameContext!.GetContainer(index)
+        : _containers[index - GameContainerCount];
+
+    private bool TryGetPackageLocation(ulong packageId, out (int ContainerIndex, FIoChunkId ChunkId) location) =>
+        _packageIdToChunk.TryGetValue(packageId, out location) ||
+        (_gameContext != null && _gameContext.TryGetPackageLocation(packageId, out location));
     
     /// <summary>
     /// Set the AES key for decrypting encrypted containers.
@@ -113,7 +140,7 @@ public class FZenPackageContext : IDisposable
             reader = new IoStoreReader(utocPath, _aesKeys);
         else
             reader = new IoStoreReader(utocPath, useEncryption ? _aesKey : null);
-        int containerIndex = _containers.Count;
+        int containerIndex = ContainerCount;
         _containers.Add(reader);
         if (overridePriority)
             _priorityContainers.Add(containerIndex);
@@ -168,7 +195,7 @@ public class FZenPackageContext : IDisposable
             
             ulong packageId = chunk.Id;
             
-            bool exists = _packageIdToChunk.ContainsKey(packageId);
+            bool exists = HasPackage(packageId);
             
             // Always allow later containers to override earlier ones
             // In IoStore, later-loaded containers have higher priority (matching game engine)
@@ -312,7 +339,9 @@ public class FZenPackageContext : IDisposable
     /// </summary>
     public List<string>? GetContainerNameMap(int containerIndex)
     {
-        return _containerNameMaps.TryGetValue(containerIndex, out var nameMap) ? nameMap : null;
+        return _containerNameMaps.TryGetValue(containerIndex, out var nameMap)
+            ? nameMap
+            : _gameContext?.GetContainerNameMap(containerIndex);
     }
     
     /// <summary>
@@ -392,10 +421,10 @@ public class FZenPackageContext : IDisposable
     /// </summary>
     public void LoadScriptObjectsFromContainer(int containerIndex = 0)
     {
-        if (containerIndex >= _containers.Count)
+        if (containerIndex >= ContainerCount)
             return;
         
-        var reader = _containers[containerIndex];
+        var reader = GetContainer(containerIndex);
         
         // Look for ScriptObjects chunk
         foreach (var chunk in reader.GetChunks())
@@ -417,8 +446,8 @@ public class FZenPackageContext : IDisposable
 
     /// <summary>
     /// Get a package by its ID (lazy loading with caching).
-    /// Thread-safe: IoStoreReader.ReadChunk uses RandomAccess (no seek races).
-    /// ConcurrentDictionary.GetOrAdd serializes duplicate loads for the same key.
+    /// Read concurrently only after the containers for this context are loaded.
+    /// IoStoreReader.ReadChunk uses positional reads.
     /// </summary>
     public FZenPackageHeader? GetPackage(ulong packageId)
     {
@@ -426,14 +455,14 @@ public class FZenPackageContext : IDisposable
         if (_packageCache.TryGetValue(packageId, out var cached))
             return cached.Header;
         
-        if (!_packageIdToChunk.TryGetValue(packageId, out var location))
+        if (!TryGetPackageLocation(packageId, out var location))
             return null;
 
         try
         {
             var result = _packageCache.GetOrAdd(packageId, _ =>
             {
-                var reader = _containers[location.ContainerIndex];
+                var reader = GetContainer(location.ContainerIndex);
                 byte[] rawData = reader.ReadChunk(location.ChunkId);
                 var header = FZenPackageHeader.Deserialize(rawData, ContainerHeaderVersion);
                 var pkg = new CachedPackage { Header = header, RawData = rawData, PackageId = packageId };
@@ -475,7 +504,7 @@ public class FZenPackageContext : IDisposable
     /// </summary>
     public bool HasPackage(ulong packageId)
     {
-        return _packageIdToChunk.ContainsKey(packageId);
+        return TryGetPackageLocation(packageId, out _);
     }
     
     /// <summary>
@@ -485,7 +514,9 @@ public class FZenPackageContext : IDisposable
     /// </summary>
     public string? GetContainerPath(ulong packageId)
     {
-        return _packageIdToContainerPath.TryGetValue(packageId, out string? path) ? path : null;
+        return _packageIdToContainerPath.TryGetValue(packageId, out string? path)
+            ? path
+            : _gameContext?.GetContainerPath(packageId);
     }
 
     /// <summary>
@@ -528,7 +559,7 @@ public class FZenPackageContext : IDisposable
         if (secondSlash < 0) return;
 
         string mount = packagePath[..(secondSlash + 1)];
-        if (_mountToVfsRoot.ContainsKey(mount)) return;
+        if (GetMountRoot(mount) != null) return;
 
         string tail = packagePath[secondSlash..];
         string bare = StripPackageExtension(vfsPath);
@@ -542,6 +573,8 @@ public class FZenPackageContext : IDisposable
         _mountToVfsRoot[mount] = root;
     }
 
+    private string? GetMountRoot(string mount) => _mountToVfsRoot.GetValueOrDefault(mount) ?? _gameContext?.GetMountRoot(mount);
+
     /// <summary>
     /// Map a mount path (/Game/X, /MarvelGAS/X) to its VFS path; null if the mount is unknown.
     /// </summary>
@@ -554,7 +587,8 @@ public class FZenPackageContext : IDisposable
         if (secondSlash < 0) return null;
 
         string mount = packagePath[..(secondSlash + 1)];
-        if (!_mountToVfsRoot.TryGetValue(mount, out string? root))
+        string? root = GetMountRoot(mount);
+        if (root == null)
             return null;
 
         return root + packagePath[secondSlash..];
@@ -566,7 +600,9 @@ public class FZenPackageContext : IDisposable
     public ulong? FindPackageIdByVfsPath(string vfsPath)
     {
         if (string.IsNullOrEmpty(vfsPath)) return null;
-        return _vfsPathToPackageId.TryGetValue(NormalizeVfsPath(vfsPath), out ulong id) ? id : null;
+        return _vfsPathToPackageId.TryGetValue(NormalizeVfsPath(vfsPath), out ulong id)
+            ? id
+            : _gameContext?.FindPackageIdByVfsPath(vfsPath);
     }
 
     /// <summary>
@@ -577,11 +613,11 @@ public class FZenPackageContext : IDisposable
         string needle = NormalizeVfsPath(pattern);
         if (needle.Length == 0) return false;
 
-        if (_packageIdToContainerPath.TryGetValue(packageId, out string? vfs) &&
-            vfs.Contains(needle, StringComparison.OrdinalIgnoreCase))
+        if (GetContainerPath(packageId)?.Contains(needle, StringComparison.OrdinalIgnoreCase) == true)
             return true;
 
-        return _packageIdToPath.TryGetValue(packageId, out string? pkg) &&
+        string? pkg = GetPackagePath(packageId);
+        return pkg != null &&
                (pkg.Contains(pattern.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase) ||
                 pkg.Contains(needle, StringComparison.OrdinalIgnoreCase));
     }
@@ -591,7 +627,9 @@ public class FZenPackageContext : IDisposable
     /// </summary>
     public string? GetPackagePath(ulong packageId)
     {
-        return _packageIdToPath.TryGetValue(packageId, out string? path) ? path : null;
+        return _packageIdToPath.TryGetValue(packageId, out string? path)
+            ? path
+            : _gameContext?.GetPackagePath(packageId);
     }
 
     /// <summary>
@@ -600,22 +638,28 @@ public class FZenPackageContext : IDisposable
     public ulong? FindPackageIdByPath(string searchPath)
     {
         string searchLower = searchPath.ToLowerInvariant();
-        foreach (var kvp in _packageIdToPath)
+        foreach (var (id, path) in EnumeratePackagePaths())
         {
-            if (kvp.Value.ToLowerInvariant().Contains(searchLower))
+            if (path.ToLowerInvariant().Contains(searchLower))
             {
-                return kvp.Key;
+                return id;
             }
         }
         return null;
     }
+
+    private IEnumerable<KeyValuePair<ulong, string>> EnumeratePackagePaths() => _gameContext == null
+        ? _packageIdToPath
+        : _packageIdToPath.Concat(_gameContext.EnumeratePackagePaths().Where(path => !_packageIdToPath.ContainsKey(path.Key)));
 
     /// <summary>
     /// Get all package IDs
     /// </summary>
     public IEnumerable<ulong> GetAllPackageIds()
     {
-        return _packageIdToChunk.Keys;
+        return _gameContext == null
+            ? _packageIdToChunk.Keys
+            : _gameContext.GetAllPackageIds().Concat(_packageIdToChunk.Keys.Where(id => !_gameContext.HasPackage(id)));
     }
     
     /// <summary>
@@ -623,6 +667,9 @@ public class FZenPackageContext : IDisposable
     /// </summary>
     public IEnumerable<ulong> GetPackageIdsFromContainer(int containerIndex)
     {
+        if (_gameContext != null && containerIndex < GameContainerCount)
+            return _gameContext.GetPackageIdsFromContainer(containerIndex).Where(id => !_packageIdToChunk.ContainsKey(id));
+
         return _packageIdToChunk
             .Where(kvp => kvp.Value.ContainerIndex == containerIndex)
             .Select(kvp => kvp.Key);
@@ -631,14 +678,14 @@ public class FZenPackageContext : IDisposable
     /// <summary>
     /// Get the index of the last loaded container (typically the mod container)
     /// </summary>
-    public int LastContainerIndex => _containers.Count - 1;
+    public int LastContainerIndex => ContainerCount - 1;
     
     /// <summary>
     /// Get the container index that owns the ExportBundleData for a package
     /// </summary>
     public int GetPackageContainerIndex(ulong packageId)
     {
-        if (_packageIdToChunk.TryGetValue(packageId, out var location))
+        if (TryGetPackageLocation(packageId, out var location))
             return location.ContainerIndex;
         return -1;
     }
@@ -648,9 +695,9 @@ public class FZenPackageContext : IDisposable
     /// </summary>
     public bool ContainerHasBulkData(ulong packageId, int containerIndex)
     {
-        if (containerIndex < 0 || containerIndex >= _containers.Count)
+        if (containerIndex < 0 || containerIndex >= ContainerCount)
             return false;
-        var reader = _containers[containerIndex];
+        var reader = GetContainer(containerIndex);
         foreach (var chunk in reader.GetChunks())
         {
             if (chunk.GetChunkType() == IoStore.EIoChunkType.BulkData && chunk.Id == packageId)
@@ -668,15 +715,15 @@ public class FZenPackageContext : IDisposable
         if (containerIndex < 0)
         {
             // Fall back to the container that owns the ExportBundleData
-            if (!_packageIdToChunk.TryGetValue(packageId, out var location))
+            if (!TryGetPackageLocation(packageId, out var location))
                 return null;
             containerIndex = location.ContainerIndex;
         }
         
-        if (containerIndex >= _containers.Count)
+        if (containerIndex >= ContainerCount)
             return null;
             
-        var reader = _containers[containerIndex];
+        var reader = GetContainer(containerIndex);
         
         // Collect all BulkData chunks for this package (may have multiple with different indices)
         var bulkChunks = new List<(ushort Index, byte[] Data)>();
@@ -767,10 +814,10 @@ public class FZenPackageContext : IDisposable
         bool debug = Environment.GetEnvironmentVariable("DEBUG_BULK") == "1";
         bool restrict = MustRestrictToSourceContainer(sourceContainerIndex);
         var parts = new List<(int Container, ushort Index, byte[] Data)>();
-        for (int ci = 0; ci < _containers.Count; ci++)
+        for (int ci = 0; ci < ContainerCount; ci++)
         {
             if (restrict && ci != sourceContainerIndex) continue;
-            var reader = _containers[ci];
+            var reader = GetContainer(ci);
             foreach (var chunk in reader.GetChunks())
             {
                 if (chunk.Id != packageId || chunk.GetChunkType() != chunkType) continue;
@@ -815,14 +862,14 @@ public class FZenPackageContext : IDisposable
         bool debug = Environment.GetEnvironmentVariable("DEBUG_BULK") == "1";
         
         // Step 1: Find the ExportBundleData chunk and get its file path from the directory index
-        if (!_packageIdToChunk.TryGetValue(packageId, out var location))
+        if (!TryGetPackageLocation(packageId, out var location))
             return null;
         
         int sourceCI = containerIndex >= 0 ? containerIndex : location.ContainerIndex;
-        if (sourceCI < 0 || sourceCI >= _containers.Count)
+        if (sourceCI < 0 || sourceCI >= ContainerCount)
             return null;
         
-        var sourceReader = _containers[sourceCI];
+        var sourceReader = GetContainer(sourceCI);
         string? chunkPath = sourceReader.GetChunkPath(location.ChunkId);
         if (string.IsNullOrEmpty(chunkPath))
         {
@@ -853,15 +900,15 @@ public class FZenPackageContext : IDisposable
         bulkRelPath = bulkRelPath.Replace('\\', '/');
         
         if (debug)
-            Console.Error.WriteLine($"[DEBUG_BULK] ReadBulkDataByPath: looking for '{bulkRelPath}' across {_containers.Count} containers");
+            Console.Error.WriteLine($"[DEBUG_BULK] ReadBulkDataByPath: looking for '{bulkRelPath}' across {ContainerCount} containers");
         
         // Step 3: Search containers for this file path. A mod-sourced package stays inside its own
         // container (see MustRestrictToSourceContainer); game packages search everywhere.
         bool restrict = MustRestrictToSourceContainer(containerIndex);
-        for (int ci = 0; ci < _containers.Count; ci++)
+        for (int ci = 0; ci < ContainerCount; ci++)
         {
             if (restrict && ci != containerIndex) continue;
-            var reader = _containers[ci];
+            var reader = GetContainer(ci);
             try
             {
                 byte[]? data = reader.ReadChunkByPath(bulkRelPath);
@@ -971,9 +1018,9 @@ public class FZenPackageContext : IDisposable
     public void PreloadAllPackages(IProgress<int>? progress = null)
     {
         int count = 0;
-        int total = _packageIdToChunk.Count;
+        int total = PackageCount;
         
-        foreach (var packageId in _packageIdToChunk.Keys)
+        foreach (var packageId in GetAllPackageIds())
         {
             GetPackage(packageId);
             count++;

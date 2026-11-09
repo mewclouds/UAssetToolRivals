@@ -514,6 +514,14 @@ and `has_unversioned_properties` flag. An unreadable package returns a null flag
 An unreadable or unsupported bundle reports its own error while the rest of the batch continues.
 The scan supports version 5 TOCs with a single UCAS partition and the UE5.3+ Zen summary layout.
 
+`extract_iostore_legacy_batch` loads the game containers once and extracts one mod at a time by default.
+Set `parallel` to `true` to allow up to two concurrent extractions in the worker.
+Send the mod UTOCs in `file_paths` and an empty or new `output_path`.
+Each mod gets its own numbered output directory, starting at `0`, and its own package overrides.
+`data.bundles` contains a `file_path` and the usual extraction `result` for each input, in input order.
+Check both `result.success` and `result.data.failed_count` for each bundle.
+The optional `aes_key`, `filter_patterns`, and `with_deps` apply to the whole batch.
+
 Run without arguments for a JSON stdin/stdout API (for GUI frontends):
 
 ```bash
@@ -619,6 +627,7 @@ The `batch_extract_texture_png` action processes all files in `file_paths`, outp
 {"action": "list_iostore_files", "file_path": "...", "aes_key": "..."}
 {"action": "scan_iostore_packages", "file_paths": ["first.utoc", "second.utoc"]}
 {"action": "extract_iostore", "file_path": "...", "output_path": "...", "aes_key": "..."}
+{"action": "extract_iostore_legacy_batch", "game_paks": "...", "file_paths": ["first.utoc", "second.utoc"], "output_path": "..."}
 {"action": "is_iostore_encrypted", "file_path": "..."}
 {"action": "recompress_iostore", "file_path": "..."}
 {"action": "decrypt_iostore", "file_path": "...", "aes_key": "..."}

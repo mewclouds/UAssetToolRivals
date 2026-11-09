@@ -1,10 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
-using UAssetAPI.UnrealTypes;
 using UAssetTool;
 using UAssetTool.IoStore;
-using UAssetTool.ZenPackage;
-using ZenHeaderVersion = UAssetTool.ZenPackage.EIoContainerHeaderVersion;
 
 internal static class IoStorePackageScanTests
 {
@@ -48,7 +45,7 @@ internal static class IoStorePackageScanTests
 
     internal static void ScanCompressedSummary()
     {
-        using var fixture = new Fixture(true, false, cookedPackage: Package(true));
+        using var fixture = new Fixture(true, false, cookedPackage: Fixture.ZenPackage(true));
 
         var packages = Scan([fixture.Utoc], fixture.KeyHex)[0].GetProperty("packages");
 
@@ -147,8 +144,8 @@ internal static class IoStorePackageScanTests
     private static void WriteBundle(string path, bool encrypt, string? key = null, bool includeBadPackages = false)
     {
         using var writer = new IoStoreWriter(path, enableCompression: false, enableEncryption: encrypt, aesKeyHex: key);
-        writer.WriteChunk(FIoChunkId.Create(1, 0, EIoChunkType.ExportBundleData), "Marvel/Content/Versioned.uasset", Package(false));
-        writer.WriteChunk(FIoChunkId.Create(2, 0, EIoChunkType.ExportBundleData), "Marvel/Content/Unversioned.uasset", Package(true));
+        writer.WriteChunk(FIoChunkId.Create(1, 0, EIoChunkType.ExportBundleData), "Marvel/Content/Versioned.uasset", Fixture.ZenPackage(false));
+        writer.WriteChunk(FIoChunkId.Create(2, 0, EIoChunkType.ExportBundleData), "Marvel/Content/Unversioned.uasset", Fixture.ZenPackage(true));
         writer.WriteChunk(FIoChunkId.Create(2, 0, EIoChunkType.BulkData), "Marvel/Content/Unversioned.ubulk", new byte[128]);
         if (includeBadPackages)
         {
@@ -156,28 +153,6 @@ internal static class IoStorePackageScanTests
             writer.WriteChunk(FIoChunkId.Create(4, 0, EIoChunkType.ExportBundleData), null, new byte[64]);
         }
         writer.Complete();
-    }
-
-    private static byte[] Package(bool unversioned)
-    {
-        var summary = new FZenPackageSummary
-        {
-            HeaderSize = 64,
-            PackageFlags = unversioned ? (uint)EPackageFlags.PKG_UnversionedProperties : 0,
-            CookedHeaderSize = 64,
-            ImportedPublicExportHashesOffset = 60,
-            ImportMapOffset = 60,
-            ExportMapOffset = 60,
-            ExportBundleEntriesOffset = 60,
-            DependencyBundleHeadersOffset = 60,
-            DependencyBundleEntriesOffset = 60,
-            ImportedPackageNamesOffset = 60
-        };
-        using var stream = new MemoryStream();
-        using var writer = new BinaryWriter(stream);
-        summary.Write(writer, ZenHeaderVersion.NoExportInfo);
-        stream.SetLength(summary.HeaderSize);
-        return stream.ToArray();
     }
 
     private static void RequireUnknown(JsonElement package)

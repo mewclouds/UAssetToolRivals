@@ -2898,6 +2898,7 @@ public partial class Program
                 "decrypt_iostore" => DecryptIoStoreJson(request.FilePath, request.AesKey),
                 "extract_iostore" => ExtractIoStoreJson(request.FilePath, request.OutputPath, request.AesKey),
                 "extract_iostore_legacy" => ExtractIoStoreLegacyJson(request.GamePaks, request.ModPath, request.OutputPath, request.FilterPatterns, request.AesKey, request.WithDeps),
+                "extract_iostore_legacy_batch" => ExtractIoStoreLegacyBatchJson(request.GamePaks, request.FilePaths, request.OutputPath, request.FilterPatterns, request.AesKey, request.WithDeps, request.Parallel),
                 "extract_script_objects" => ExtractScriptObjectsJson(request.FilePath, request.OutputPath),
                 "create_mod_iostore" => CreateModIoStoreJson(request.OutputPath, request.InputDir, request.InputPak, request.MountPoint, request.Compress, request.AesKey, request.Parallel, request.Obfuscate, request.Hybrid),
                 
@@ -7003,38 +7004,7 @@ public partial class Program
         {
             Directory.CreateDirectory(outputPath);
 
-            // Create package context for proper import resolution
-            using var context = new ZenPackage.FZenPackageContext();
-
-            // Set AES key - use provided key or default Marvel Rivals key
-            string aesKey = string.IsNullOrEmpty(aesKeyHex)
-                ? "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74"
-                : aesKeyHex;
-            context.SetAesKey(aesKey);
-
-            Console.Error.WriteLine($"[ExtractIoStoreLegacy] Loading game containers from: {gamePaks}");
-
-            // Load global.utoc first for script objects
-            string globalPath = Path.Combine(gamePaks, "global.utoc");
-            if (File.Exists(globalPath))
-            {
-                Console.Error.WriteLine("[ExtractIoStoreLegacy] Loading global.utoc...");
-                context.LoadContainer(globalPath);
-                context.LoadScriptObjectsFromContainer(0);
-            }
-
-            // Load other game containers
-            var utocFiles = Directory.GetFiles(gamePaks, "*.utoc", SearchOption.TopDirectoryOnly)
-                .Where(f => !f.EndsWith("global.utoc", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(f => f)
-                .ToList();
-
-            Console.Error.WriteLine($"[ExtractIoStoreLegacy] Loading {utocFiles.Count} game containers...");
-            foreach (var utocFile in utocFiles)
-            {
-                try { context.LoadContainer(utocFile); }
-                catch (Exception ex) { Console.Error.WriteLine($"  Warning: Failed to load {Path.GetFileName(utocFile)}: {ex.Message}"); }
-            }
+            using var context = LoadLegacyGameContext(gamePaks, aesKeyHex);
 
             // Load mod containers if specified
             int modContainerIndex = -1;
@@ -7078,6 +7048,27 @@ public partial class Program
                 }
             }
 
+            return ExtractLegacyPackages(context, packagesToExtract, outputPath, filterPatterns, withDeps);
+        }
+        catch (Exception ex)
+        {
+            return LegacyExtractionError(ex.Message);
+        }
+    }
+
+    private static UAssetResponse ExtractLegacyPackages(
+        ZenPackage.FZenPackageContext context, IEnumerable<ulong> packageIds, string outputPath,
+        List<string>? filterPatterns, bool withDeps)
+    {
+        try
+        {
+            IEnumerable<ulong> packagesToExtract = packageIds;
+            string outputRoot = Path.GetFullPath(outputPath);
+            string outputPrefix = Path.EndsInDirectorySeparator(outputRoot)
+                ? outputRoot
+                : outputRoot + Path.DirectorySeparatorChar;
+            var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
             // Apply filter patterns if specified
             if (filterPatterns != null && filterPatterns.Count > 0)
             {
@@ -7085,7 +7076,7 @@ public partial class Program
                     .Where(id => filterPatterns.Any(pattern => context.PathMatchesFilter(id, pattern)))
                     .ToList();
                 packagesToExtract = filtered;
-                Console.Error.WriteLine($"[ExtractIoStoreLegacy] Filtered to {packagesToExtract.Count()} packages matching patterns");
+                Console.Error.WriteLine($"[ExtractIoStoreLegacy] Filtered to {filtered.Count} packages matching patterns");
             }
 
             // Extract packages
@@ -7109,7 +7100,11 @@ public partial class Program
 
                 string? fullPath = context.GetPackagePath(packageId);
                 var cached = context.GetCachedPackage(packageId);
-                if (cached == null) return imports;
+                if (cached == null)
+                {
+                    if (!isDependency) failed++;
+                    return imports;
+                }
 
                 string packageName = !string.IsNullOrEmpty(fullPath) ? fullPath : cached.Header.PackageName();
 
@@ -7122,7 +7117,9 @@ public partial class Program
                         imports.AddRange(converter.GetImportedPackageIds());
 
                     string relPath = ResolveVfsOutputPath(context, packageId, packageName);
-                    string outputAssetPath = Path.Combine(outputPath, relPath);
+                    string outputAssetPath = Path.GetFullPath(relPath, outputRoot);
+                    if (Path.IsPathRooted(relPath) || !outputAssetPath.StartsWith(outputPrefix, pathComparison))
+                        throw new InvalidDataException($"Package path escapes the extraction directory: {relPath}");
                     string? outputAssetDir = Path.GetDirectoryName(outputAssetPath);
                     if (!string.IsNullOrEmpty(outputAssetDir))
                         Directory.CreateDirectory(outputAssetDir);
@@ -7206,7 +7203,7 @@ public partial class Program
         }
         catch (Exception ex)
         {
-            return new UAssetResponse { Success = false, Message = $"Failed to extract IoStore (legacy): {ex.Message}" };
+            return LegacyExtractionError(ex.Message);
         }
     }
 

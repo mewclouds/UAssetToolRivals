@@ -5,6 +5,9 @@ using System.Text;
 using System.Text.Json;
 using UAssetTool;
 using UAssetTool.IoStore;
+using EPackageFlags = UAssetAPI.UnrealTypes.EPackageFlags;
+using FZenPackageSummary = UAssetTool.ZenPackage.FZenPackageSummary;
+using ZenHeaderVersion = UAssetTool.ZenPackage.EIoContainerHeaderVersion;
 
 var tests = new (string Name, Action Run, bool WindowsOnly)[]
 {
@@ -26,6 +29,7 @@ var tests = new (string Name, Action Run, bool WindowsOnly)[]
     ("IoStore package scan compressed summary", IoStorePackageScanTests.ScanCompressedSummary, false),
     ("IoStore package scan failures", IoStorePackageScanTests.ReportUnreadableInputs, false),
     ("IoStore package scan invalid requests", IoStorePackageScanTests.RejectInvalidRequests, false),
+    ("legacy extraction batch isolates mod overrides", LegacyExtractionBatchTests.ExtractInBothOrders, false),
 };
 int passed = 0, failed = 0, skipped = 0;
 foreach (var test in tests)
@@ -310,6 +314,31 @@ sealed class Fixture : IDisposable
         encryptedToc[80] |= 2;
         File.WriteAllBytes(Utoc, encryptedToc);
         File.WriteAllBytes(Ucas, encryptedUcas);
+    }
+
+    public static byte[] ZenPackage(bool unversioned)
+    {
+        // Empty name and bulk maps take 24 bytes after the summary. The
+        // remaining map offsets all point to an empty imported name batch.
+        const int emptyMapsOffset = 76;
+        var summary = new FZenPackageSummary
+        {
+            HeaderSize = emptyMapsOffset + 4,
+            PackageFlags = unversioned ? (uint)EPackageFlags.PKG_UnversionedProperties : 0,
+            CookedHeaderSize = emptyMapsOffset + 4,
+            ImportedPublicExportHashesOffset = emptyMapsOffset,
+            ImportMapOffset = emptyMapsOffset,
+            ExportMapOffset = emptyMapsOffset,
+            ExportBundleEntriesOffset = emptyMapsOffset,
+            DependencyBundleHeadersOffset = emptyMapsOffset,
+            DependencyBundleEntriesOffset = emptyMapsOffset,
+            ImportedPackageNamesOffset = emptyMapsOffset
+        };
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        summary.Write(writer, ZenHeaderVersion.NoExportInfo);
+        stream.SetLength(summary.HeaderSize);
+        return stream.ToArray();
     }
 
     private static void WriteString(BinaryWriter writer, string text, bool wide)

@@ -528,6 +528,11 @@ and isolates schemas discovered during each read.
 The response reports the package flag, export classes, and whether each read decoded every export.
 Clean reads include a value fingerprint for comparing layouts of the same asset.
 A failed read reports its own error in `data.reads`, in request order.
+Set `verify_exports` on a read to check whether an in-memory JSON round trip reproduces
+the original `.uexp` bytes. The result reports `writes_original`.
+Providing `target_usmap_path` also requests that proof. If it succeeds, `portable`
+reports whether every stored property has a compatible target slot in the same relative order.
+An incompatible layout includes a `portability_reason`. The verification leaves the input files untouched.
 
 Run without arguments for a JSON stdin/stdout API (for GUI frontends):
 

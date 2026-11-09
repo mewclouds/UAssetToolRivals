@@ -9,7 +9,9 @@ namespace UAssetTool;
 
 public sealed record AssetLayoutReadRequest(
     [property: JsonPropertyName("file_path")] string? FilePath,
-    [property: JsonPropertyName("usmap_path")] string? UsmapPath);
+    [property: JsonPropertyName("usmap_path")] string? UsmapPath,
+    [property: JsonPropertyName("verify_exports")] bool VerifyExports = false,
+    [property: JsonPropertyName("target_usmap_path")] string? TargetUsmapPath = null);
 
 public partial class Program
 {
@@ -24,6 +26,9 @@ public partial class Program
         [property: JsonPropertyName("clean")] bool? Clean = null,
         [property: JsonPropertyName("classes")] string[]? Classes = null,
         [property: JsonPropertyName("values_sha256")] string? ValuesSha256 = null,
+        [property: JsonPropertyName("writes_original")] bool? WritesOriginal = null,
+        [property: JsonPropertyName("portable")] bool? Portable = null,
+        [property: JsonPropertyName("portability_reason")] string? PortabilityReason = null,
         [property: JsonPropertyName("error")] string? Error = null);
 
     private static UAssetResponse ReadAssetLayoutsJson(List<AssetLayoutReadRequest?>? requests)
@@ -38,28 +43,41 @@ public partial class Program
         {
             string? assetPath = request?.FilePath;
             string? mappingsPath = request?.UsmapPath;
+            var read = new AssetLayoutReadResult(assetPath, mappingsPath);
             try
             {
                 if (string.IsNullOrWhiteSpace(assetPath) || string.IsNullOrWhiteSpace(mappingsPath))
                     throw new ArgumentException("file_path and usmap_path are required for each read.");
 
-                string fullMappingsPath = Path.GetFullPath(mappingsPath);
-                if (!mappings.TryGetValue(fullMappingsPath, out var parsed))
-                {
-                    parsed = new Lazy<Usmap>(() => new Usmap(fullMappingsPath));
-                    mappings.Add(fullMappingsPath, parsed);
-                }
-
-                var asset = LoadAssetWithMappings(assetPath, parsed.Value.ForkForAssetRead());
+                var source = GetLayoutMappings(mappings, mappingsPath);
+                var asset = LoadAssetWithMappings(assetPath, source.ForkForAssetRead());
                 PreloadReferencedAssetsForSchemas(asset);
                 bool clean = asset.Exports.All(export => export is not RawExport);
-                reads.Add(new AssetLayoutReadResult(assetPath, mappingsPath, asset.HasUnversionedProperties,
-                    clean, GetLayoutExportClasses(asset), clean ? HashLayoutValues(asset) : null));
+                read = read with
+                {
+                    HasUnversionedProperties = asset.HasUnversionedProperties,
+                    Clean = clean,
+                    Classes = GetLayoutExportClasses(asset),
+                    ValuesSha256 = clean ? HashLayoutValues(asset) : null
+                };
+                if (clean && (request!.VerifyExports || request.TargetUsmapPath != null))
+                {
+                    string document = asset.SerializeJson();
+                    bool exact = WritesOriginalExports(assetPath, document, source);
+                    read = read with { WritesOriginal = exact };
+                    if (exact && request.TargetUsmapPath != null)
+                    {
+                        var target = GetLayoutMappings(mappings, request.TargetUsmapPath);
+                        string? reason = AssetLayoutPortability.GetBlockingReason(asset, document, target);
+                        read = read with { Portable = reason == null, PortabilityReason = reason };
+                    }
+                }
             }
             catch (Exception ex)
             {
-                reads.Add(new AssetLayoutReadResult(assetPath, mappingsPath, Error: ex.Message));
+                read = read with { Error = ex.Message };
             }
+            reads.Add(read);
         }
 
         return new UAssetResponse
@@ -68,6 +86,37 @@ public partial class Program
             Message = $"Processed {reads.Count} asset layout read(s).",
             Data = new { reads, layouts_loaded = mappings.Values.Count(layout => layout.IsValueCreated) }
         };
+    }
+
+    private static Usmap GetLayoutMappings(Dictionary<string, Lazy<Usmap>> mappings, string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        if (!mappings.TryGetValue(fullPath, out var parsed))
+        {
+            parsed = new Lazy<Usmap>(() => new Usmap(fullPath));
+            mappings.Add(fullPath, parsed);
+        }
+        return parsed.Value;
+    }
+
+    private static bool WritesOriginalExports(string assetPath, string document, Usmap source)
+    {
+        // Use the same JSON round trip as from_json, with a fresh mappings
+        // view. Its write-back is isolated from the source asset directory.
+        var proof = UAsset.DeserializeJson(document);
+        proof.Mappings = source.ForkForAssetRead();
+        proof.FilePath = Path.Combine(Path.GetTempPath(), $"uatr-layout-proof-{Guid.NewGuid():N}", Path.GetFileName(assetPath));
+        PreloadReferencedAssetsForSchemas(proof);
+        proof.Write(out var package, out var exports);
+        using (package)
+        using (exports)
+        {
+            if (exports == null)
+                throw new InvalidDataException("The write did not produce a separate export stream.");
+
+            byte[] original = File.ReadAllBytes(Path.ChangeExtension(assetPath, ".uexp"));
+            return original.AsSpan().SequenceEqual(exports.GetBuffer().AsSpan(0, checked((int)exports.Length)));
+        }
     }
 
     private static string[] GetLayoutExportClasses(UAsset asset)

@@ -32,6 +32,7 @@ var tests = new (string Name, Action Run, bool WindowsOnly)[]
     ("legacy extraction batch isolates mod overrides", LegacyExtractionBatchTests.ExtractInBothOrders, false),
     ("asset layout reads reuse mappings and isolate failures", AssetLayoutReadTests.ReadBatch, false),
     ("asset mappings keep discovered definitions local", AssetLayoutReadTests.IsolateDiscoveredMappings, false),
+    ("asset layout proof checks exact bytes and inherited slot compatibility", AssetLayoutProofTests.VerifyRoundTripAndPortability, false),
 };
 int passed = 0, failed = 0, skipped = 0;
 foreach (var test in tests)

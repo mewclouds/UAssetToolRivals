@@ -506,6 +506,14 @@ The operation restores the UCAS backup if TOC replacement fails. A failed rollba
 The optional key defaults to the Marvel Rivals game key.
 An encrypted directory index can validate a supplied key. A clear index cannot validate that key.
 
+`scan_iostore_packages` reads the Zen package summaries in a batch of mod containers without extracting assets.
+Send the UTOC paths in `file_paths` and supply `aes_key` if the containers use a custom key.
+The worker scans up to four containers in parallel and returns `data.bundles` in input order.
+Each bundle reports its path and packages. Each package reports its chunk ID, available archive path,
+and `has_unversioned_properties` flag. An unreadable package returns a null flag and an error.
+An unreadable or unsupported bundle reports its own error while the rest of the batch continues.
+The scan supports version 5 TOCs with a single UCAS partition and the UE5.3+ Zen summary layout.
+
 Run without arguments for a JSON stdin/stdout API (for GUI frontends):
 
 ```bash
@@ -609,6 +617,7 @@ The `batch_extract_texture_png` action processes all files in `file_paths`, outp
 **IoStore (Additional)**
 ```json
 {"action": "list_iostore_files", "file_path": "...", "aes_key": "..."}
+{"action": "scan_iostore_packages", "file_paths": ["first.utoc", "second.utoc"]}
 {"action": "extract_iostore", "file_path": "...", "output_path": "...", "aes_key": "..."}
 {"action": "is_iostore_encrypted", "file_path": "..."}
 {"action": "recompress_iostore", "file_path": "..."}
@@ -621,7 +630,7 @@ The `batch_extract_texture_png` action processes all files in `file_paths`, outp
 
 ## Project Structure
 
-Run the direct-decryption regression checks with `dotnet run --project tests/UAssetTool.Tests -c Release`.
+Run the worker regression checks with `dotnet run --project tests/UAssetTool.Tests -c Release`.
 The checks use disposable fixtures and require no additional test packages.
 
 ```

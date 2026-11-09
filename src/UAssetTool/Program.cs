@@ -2889,6 +2889,7 @@ public partial class Program
                 
                 // IoStore operations
                 "list_iostore_files" => ListIoStoreFiles(request.FilePath, request.AesKey, request.IncludeTypes, request.ScriptObjectsPath, request.GamePaks, request.TypeFilter),
+                "scan_iostore_packages" => ScanIoStorePackagesJson(request.FilePaths, request.AesKey),
                 "create_iostore" => CreateIoStoreJson(request.OutputPath, request.InputDir, request.Compress, request.AesKey),
                 "version" => GetVersionJson(),
                 "is_iostore_compressed" => IsIoStoreCompressed(request.FilePath),
@@ -6609,6 +6610,26 @@ public partial class Program
         }
     }
     
+    private static UAssetResponse ScanIoStorePackagesJson(List<string>? filePaths, string? aesKeyHex)
+    {
+        if (filePaths == null || filePaths.Count == 0)
+            return new UAssetResponse { Success = false, Message = "file_paths must contain at least one UTOC path." };
+
+        string hex = string.IsNullOrEmpty(aesKeyHex) ? IoStore.IoStoreReader.DEFAULT_AES_KEY_HEX : aesKeyHex;
+        if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            hex = hex[2..];
+        if (hex.Length != 64)
+            return new UAssetResponse { Success = false, Message = "An AES-256 key must contain 64 hex digits." };
+
+        var bundles = IoStore.IoStorePackageScanner.Scan(filePaths, Convert.FromHexString(hex));
+        return new UAssetResponse
+        {
+            Success = true,
+            Message = $"Scanned {bundles.Length} IoStore container(s).",
+            Data = new { bundles }
+        };
+    }
+
     /// <summary>
     /// Parse AES key from hex string, or return null for default
     /// </summary>

@@ -22,6 +22,10 @@ var tests = new (string Name, Action Run, bool WindowsOnly)[]
     ("CLI success and invalid arguments", CliSuccess, false),
     ("TOC replacement rollback", RestoreAfterReplacementFailure, true),
     ("locked UCAS", RejectLockedUcas, true),
+    ("IoStore package scan batch", IoStorePackageScanTests.ScanBatch, false),
+    ("IoStore package scan compressed summary", IoStorePackageScanTests.ScanCompressedSummary, false),
+    ("IoStore package scan failures", IoStorePackageScanTests.ReportUnreadableInputs, false),
+    ("IoStore package scan invalid requests", IoStorePackageScanTests.RejectInvalidRequests, false),
 };
 int passed = 0, failed = 0, skipped = 0;
 foreach (var test in tests)
@@ -236,6 +240,7 @@ static void Require(bool condition, string message) { if (!condition) throw new 
 
 sealed class Fixture : IDisposable
 {
+    private const int CompressionBlockSize = 256;
     // The block table follows two chunk IDs, two offset entries, one seed, and one overflow index.
     public const int BlockOffset = 144 + 2 * (12 + 10) + 4 + 4;
     public const int DirectoryOffset = BlockOffset + 2 * 12 + 32;
@@ -246,12 +251,12 @@ sealed class Fixture : IDisposable
     public byte[] PlainToc { get; }
     public byte[] PlainUcas { get; }
 
-    public Fixture(bool encryptedDirectory, bool wideNames)
+    public Fixture(bool encryptedDirectory, bool wideNames, byte[]? cookedPackage = null)
     {
         byte[] key = Enumerable.Range(1, 32).Select(index => (byte)index).ToArray();
         KeyHex = Convert.ToHexString(key);
         using var compressed = new MemoryStream();
-        byte[] cooked = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("cooked texture bytes", 10)));
+        byte[] cooked = cookedPackage ?? Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("cooked texture bytes", 10)));
         using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, leaveOpen: true)) { zlib.Write(cooked); }
         byte[] packed = compressed.ToArray();
         using var directory = new MemoryStream();
@@ -270,11 +275,17 @@ sealed class Fixture : IDisposable
         PlainToc = new byte[DirectoryOffset + indexData.Length + 64];
         FIoStoreTocHeader.TOC_MAGIC.CopyTo(PlainToc, 0);
         PlainToc[16] = 5;
-        foreach (var field in new Dictionary<int, uint> { [20] = 144, [24] = 2, [28] = 2, [32] = 12, [36] = 1, [40] = 32, [44] = 256, [48] = (uint)indexData.Length, [52] = 1, [84] = 1, [96] = 1 })
+        foreach (var field in new Dictionary<int, uint> { [20] = 144, [24] = 2, [28] = 2, [32] = 12, [36] = 1, [40] = 32, [44] = CompressionBlockSize, [48] = (uint)indexData.Length, [52] = 1, [84] = 1, [96] = 1 })
             BinaryPrimitives.WriteUInt32LittleEndian(PlainToc.AsSpan(field.Key), field.Value);
         BinaryPrimitives.WriteUInt64LittleEndian(PlainToc.AsSpan(56), 987654321);
         PlainToc.AsSpan(144, 24).Fill(0xAB);
         PlainToc[156] = 0xBC;
+        if (cookedPackage != null)
+        {
+            // The second chunk begins at the second virtual compression block.
+            FIoChunkId.Create(2, 0, EIoChunkType.ExportBundleData).ToBytes().CopyTo(PlainToc, 144 + 12);
+            new FIoOffsetAndLength(CompressionBlockSize, (ulong)cooked.Length).ToBytes().CopyTo(PlainToc, 144 + 2 * 12 + 10);
+        }
         PlainToc[80] = 9;
         PlainToc[BlockOffset + 5] = PlainToc[BlockOffset + 8] = 19;
         PlainToc[BlockOffset + 12] = 64;

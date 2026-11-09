@@ -519,6 +519,7 @@ public class IoStoreToc
 {
     public EIoStoreTocVersion Version { get; set; }
     public EIoContainerFlags ContainerFlags { get; set; }
+    public uint PartitionCount { get; private set; }
     public uint CompressionBlockSize { get; set; }
     public List<FIoChunkId> Chunks { get; set; } = new();
     public List<FIoOffsetAndLengthReadable> ChunkOffsetLengths { get; set; } = new();
@@ -575,7 +576,8 @@ public class IoStoreToc
 
         // Read header - matches FIoStoreTocHeader structure
         byte[] magic = reader.ReadBytes(16);
-        // Validate magic: "-==--==--==--==-" (0x2D, 0x3D, 0x3D, 0x2D repeated)
+        if (!magic.AsSpan().SequenceEqual(FIoStoreTocHeader.TOC_MAGIC))
+            throw new InvalidDataException("Invalid IoStore TOC magic.");
         
         toc.Version = (EIoStoreTocVersion)reader.ReadByte();
         byte reserved0 = reader.ReadByte();
@@ -588,7 +590,7 @@ public class IoStoreToc
         uint compressionMethodNameLength = reader.ReadUInt32();
         toc.CompressionBlockSize = reader.ReadUInt32();
         uint directoryIndexSize = reader.ReadUInt32();
-        uint partitionCount = reader.ReadUInt32();
+        toc.PartitionCount = reader.ReadUInt32();
         ulong containerId = reader.ReadUInt64();
         toc.ContainerId = new FIoContainerId(containerId);
         byte[] encryptionKeyGuid = reader.ReadBytes(16);
@@ -603,7 +605,7 @@ public class IoStoreToc
         reader.ReadBytes(40); // reserved8: 5 x u64
         
         if (Environment.GetEnvironmentVariable("DEBUG") == "1")
-            Console.Error.WriteLine($"[TOC] partitionCount={partitionCount}, partitionSize={partitionSize}, compressionBlocks={tocCompressedBlockEntryCount}");
+            Console.Error.WriteLine($"[TOC] partitionCount={toc.PartitionCount}, partitionSize={partitionSize}, compressionBlocks={tocCompressedBlockEntryCount}");
         
         // We're now at the end of the header, chunk data follows
 

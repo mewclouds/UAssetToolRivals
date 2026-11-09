@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using UAssetTool.ZenPackage;
 
 namespace UAssetTool;
@@ -6,6 +7,12 @@ namespace UAssetTool;
 public partial class Program
 {
     private const int MaxConcurrentLegacyExtractions = 2;
+
+    private sealed record LegacyExtractionData(
+        [property: JsonPropertyName("extracted_count")] int ExtractedCount,
+        [property: JsonPropertyName("failed_count")] int FailedCount,
+        [property: JsonPropertyName("output_dir")] string OutputDir,
+        [property: JsonPropertyName("files")] IReadOnlyList<string> Files);
 
     private static FZenPackageContext LoadLegacyGameContext(string gamePaks, string? aesKeyHex)
     {

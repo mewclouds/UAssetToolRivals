@@ -33,6 +33,7 @@ var tests = new (string Name, Action Run, bool WindowsOnly)[]
     ("asset layout reads reuse mappings and isolate failures", AssetLayoutReadTests.ReadBatch, false),
     ("asset mappings keep discovered definitions local", AssetLayoutReadTests.IsolateDiscoveredMappings, false),
     ("asset layout proof checks exact bytes and inherited slot compatibility", AssetLayoutProofTests.VerifyRoundTripAndPortability, false),
+    ("IoStore patch check isolates bundle verdicts", IoStorePatchCheckTests.CheckMixedBundles, false),
 };
 int passed = 0, failed = 0, skipped = 0;
 foreach (var test in tests)

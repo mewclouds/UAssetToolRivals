@@ -82,7 +82,7 @@ internal static class AssetLayoutReadTests
             "A custom version change leaked into another read.");
     }
 
-    private static string WriteMappings(string root)
+    internal static string WriteMappings(string root)
     {
         using var payload = new MemoryStream();
         using (var data = new BinaryWriter(payload, Encoding.UTF8, leaveOpen: true))

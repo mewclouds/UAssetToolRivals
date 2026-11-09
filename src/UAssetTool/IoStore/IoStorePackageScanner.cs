@@ -14,6 +14,7 @@ internal sealed record IoStorePackageScan(
     [property: JsonPropertyName("chunk_id")] string ChunkId,
     [property: JsonPropertyName("path")] string? Path,
     [property: JsonPropertyName("has_unversioned_properties")] bool? HasUnversionedProperties,
+    [property: JsonIgnore] ulong PackageId,
     [property: JsonPropertyName("error")] string? Error = null);
 
 internal static class IoStorePackageScanner
@@ -57,11 +58,11 @@ internal static class IoStorePackageScanner
                 string? packagePath = reader.GetChunkPath(chunk);
                 try
                 {
-                    packages.Add(new IoStorePackageScan(chunkId, packagePath, ReadUnversionedFlag(reader, i)));
+                    packages.Add(new IoStorePackageScan(chunkId, packagePath, ReadUnversionedFlag(reader, i), chunk.Id));
                 }
                 catch (Exception ex)
                 {
-                    packages.Add(new IoStorePackageScan(chunkId, packagePath, null, ex.Message));
+                    packages.Add(new IoStorePackageScan(chunkId, packagePath, null, chunk.Id, ex.Message));
                 }
             }
             return new IoStoreBundleScan(path, packages);

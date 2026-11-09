@@ -534,6 +534,16 @@ Providing `target_usmap_path` also requests that proof. If it succeeds, `portabl
 reports whether every stored property has a compatible target slot in the same relative order.
 An incompatible layout includes a `portability_reason`. The verification leaves the input files untouched.
 
+`check_iostore_patch` runs the full read-only patch check in one request.
+Supply the installed `game_paks` directory and the complete mod bundles to check in
+`patch_bundles`, with a UTOC `file_path` and its companion `pak_path` for each.
+Pass the current build and mappings first in `patch_layouts`, followed by older builds
+in descending order. The worker scans the package headers, loads the game index once
+if deeper checks are needed, and uses temporary staging to check the candidate assets.
+`data.bundles` returns a verdict for every input in request order, with any non-current
+asset findings. An `updated` verdict means the assets are candidates for an update.
+The check leaves the input bundles untouched.
+
 Run without arguments for a JSON stdin/stdout API (for GUI frontends):
 
 ```bash
@@ -638,6 +648,7 @@ The `batch_extract_texture_png` action processes all files in `file_paths`, outp
 **IoStore (Additional)**
 ```json
 {"action": "list_iostore_files", "file_path": "...", "aes_key": "..."}
+{"action": "check_iostore_patch", "game_paks": "...", "patch_bundles": [{"file_path": "mod.utoc", "pak_path": "mod.pak"}], "patch_layouts": [{"build": 200, "usmap_path": "current.usmap"}, {"build": 199, "usmap_path": "older.usmap"}]}
 {"action": "scan_iostore_packages", "file_paths": ["first.utoc", "second.utoc"]}
 {"action": "extract_iostore", "file_path": "...", "output_path": "...", "aes_key": "..."}
 {"action": "extract_iostore_legacy_batch", "game_paks": "...", "file_paths": ["first.utoc", "second.utoc"], "output_path": "..."}

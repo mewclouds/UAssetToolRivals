@@ -2891,6 +2891,7 @@ public partial class Program
                 // IoStore operations
                 "list_iostore_files" => ListIoStoreFiles(request.FilePath, request.AesKey, request.IncludeTypes, request.ScriptObjectsPath, request.GamePaks, request.TypeFilter),
                 "scan_iostore_packages" => ScanIoStorePackagesJson(request.FilePaths, request.AesKey),
+                "check_iostore_patch" => CheckIoStorePatchJson(request.GamePaks, request.PatchBundles, request.PatchLayouts, request.AesKey),
                 "create_iostore" => CreateIoStoreJson(request.OutputPath, request.InputDir, request.Compress, request.AesKey),
                 "version" => GetVersionJson(),
                 "is_iostore_compressed" => IsIoStoreCompressed(request.FilePath),
@@ -7059,7 +7060,7 @@ public partial class Program
 
     private static UAssetResponse ExtractLegacyPackages(
         ZenPackage.FZenPackageContext context, IEnumerable<ulong> packageIds, string outputPath,
-        List<string>? filterPatterns, bool withDeps)
+        List<string>? filterPatterns, bool withDeps, Action<ulong, string>? onExtracted = null)
     {
         try
         {
@@ -7153,6 +7154,7 @@ public partial class Program
                         extractedFiles.Add(Path.ChangeExtension(relPath, ".m.ubulk"));
                     }
 
+                    onExtracted?.Invoke(packageId, relPath);
                     converted++;
                 }
                 catch (Exception ex)
@@ -7193,13 +7195,7 @@ public partial class Program
             {
                 Success = true,
                 Message = $"Extracted {converted} packages from IoStore ({failed} failed)",
-                Data = new Dictionary<string, object?>
-                {
-                    ["extracted_count"] = converted,
-                    ["failed_count"] = failed,
-                    ["output_dir"] = outputPath,
-                    ["files"] = extractedFiles
-                }
+                Data = new LegacyExtractionData(converted, failed, outputPath, extractedFiles)
             };
         }
         catch (Exception ex)
@@ -7768,6 +7764,12 @@ public class UAssetRequest
 
     [JsonPropertyName("layout_reads")]
     public List<AssetLayoutReadRequest?>? LayoutReads { get; set; }
+
+    [JsonPropertyName("patch_bundles")]
+    public List<IoStorePatchBundle?>? PatchBundles { get; set; }
+
+    [JsonPropertyName("patch_layouts")]
+    public List<IoStorePatchLayout?>? PatchLayouts { get; set; }
     
     // GUI Backend fields
     [JsonPropertyName("export_index")]
